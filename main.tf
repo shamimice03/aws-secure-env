@@ -13,7 +13,7 @@ module "vpc" {
 
   enable_dns_hostnames      = true
   enable_dns_support        = true
-  enable_single_nat_gateway = false
+  enable_single_nat_gateway = true
 
   tags = {
     Name = "secure-env-vpc"
@@ -144,56 +144,6 @@ resource "aws_security_group" "private_instance" {
 
   tags = {
     Name = "private-instance-sg"
-  }
-}
-
-# Network ACL for Private Subnets
-resource "aws_network_acl" "private" {
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_id
-
-  # Allow outbound HTTPS to VPC endpoints
-  egress {
-    protocol   = "tcp"
-    rule_no    = 100
-    action     = "allow"
-    cidr_block = module.vpc.vpc_cidr_block
-    from_port  = 443
-    to_port    = 443
-  }
-
-  # Allow return traffic for VPC endpoint requests
-  ingress {
-    protocol   = "tcp"
-    rule_no    = 100
-    action     = "allow"
-    cidr_block = module.vpc.vpc_cidr_block
-    from_port  = 1024
-    to_port    = 65535
-  }
-
-  # Allow outbound HTTPS to internet via NAT Gateway
-  egress {
-    protocol   = "tcp"
-    rule_no    = 200
-    action     = "allow"
-    cidr_block = "0.0.0.0/0"
-    from_port  = 443
-    to_port    = 443
-  }
-
-  # Allow return traffic for internet requests
-  ingress {
-    protocol   = "tcp"
-    rule_no    = 200
-    action     = "allow"
-    cidr_block = "0.0.0.0/0"
-    from_port  = 1024
-    to_port    = 65535
-  }
-
-  tags = {
-    Name = "private-subnet-nacl"
   }
 }
 
