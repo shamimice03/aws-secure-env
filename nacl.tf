@@ -73,7 +73,7 @@ variable "network_rules" {
       }
     }
     s3_prefix_list = {
-      create     = false
+      create     = true
       name       = "S3 Endpoints"
       rule_start = 250
       cidrs = [
