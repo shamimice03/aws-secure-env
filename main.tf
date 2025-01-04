@@ -13,7 +13,7 @@ module "vpc" {
 
   enable_dns_hostnames      = true
   enable_dns_support        = true
-  enable_single_nat_gateway = true
+  enable_single_nat_gateway = false
 
   tags = {
     Name = "secure-env-vpc"
@@ -32,7 +32,7 @@ module "endpoints" {
   endpoints = {
     # S3 Gateway endpoint
     s3_gateway = {
-      create          = false
+      create          = true
       service         = "s3"
       service_type    = "Gateway"
       route_table_ids = [module.vpc.private_route_table_id]
