@@ -18,6 +18,7 @@ variable "network_rules" {
   }))
 
   default = {
+    # Required to pass local traffic
     vpc = {
       create     = true
       name       = "VPC Internal"
@@ -34,8 +35,9 @@ variable "network_rules" {
         to_port   = 0
       }
     }
+    # Required for pulling docker images
     docker = {
-      create     = false
+      create     = true
       name       = "Docker Registry"
       rule_start = 200
       cidrs      = ["54.0.0.0/8"]
@@ -50,8 +52,12 @@ variable "network_rules" {
         to_port   = 443
       }
     }
+    # Required for pulling docker images
+    # For Cloudflare IP ranges:
+    # Go to https://www.cloudflare.com/ips/
+    # Or use their API: https://api.cloudflare.com/client/v4/ips
     cloudflare = {
-      create     = false
+      create     = true
       name       = "Cloudflare"
       rule_start = 300
       cidrs = [
@@ -72,6 +78,10 @@ variable "network_rules" {
         to_port   = 443
       }
     }
+
+    # Required for pulling DNF packages
+    # NAT + this list = OK
+    # S3 Gateway endpoint + this list = OK
     s3_prefix_list = {
       create     = true
       name       = "S3 Endpoints"
