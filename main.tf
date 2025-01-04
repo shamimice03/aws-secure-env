@@ -19,7 +19,6 @@ module "vpc" {
     Name = "secure-env-vpc"
   }
 }
-
 # Security Group for VPC Endpoints
 # Controls access to AWS services through VPC endpoints
 resource "aws_security_group" "vpc_endpoints" {
@@ -27,17 +26,17 @@ resource "aws_security_group" "vpc_endpoints" {
   vpc_id      = module.vpc.vpc_id
 
   ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = [module.vpc.vpc_cidr_block]
     description = "Allow HTTPS from VPC CIDR"
   }
 
   egress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
     description = "Allow HTTPS to VPC CIDR"
   }
@@ -46,7 +45,6 @@ resource "aws_security_group" "vpc_endpoints" {
     Name = "vpc-endpoints-sg"
   }
 }
-
 # VPC Endpoints Configuration
 # Sets up Gateway endpoints for S3 and DynamoDB access, plus SSM endpoints
 module "endpoints" {
@@ -56,19 +54,28 @@ module "endpoints" {
   vpc_id             = module.vpc.vpc_id
   security_group_ids = [aws_security_group.vpc_endpoints.id]
 
+
   endpoints = {
-    s3 = {
-      service         = "s3"
-      service_type    = "Gateway"
-      route_table_ids = [module.vpc.private_route_table_id]
-      tags            = { Name = "s3-gateway-vpc-endpoint" }
+    # S3 Gateway endpoint required for S3 interface endpoint to enable "Enable private DNS names"
+    s3_gateway = {
+      service      = "s3"
+      service_type = "Gateway"
+      #route_table_ids = [module.vpc.private_route_table_id]
+      tags = { Name = "s3-gateway-vpc-endpoint" }
     },
-    dynamodb = {
-      service         = "dynamodb"
-      service_type    = "Gateway"
-      route_table_ids = [module.vpc.private_route_table_id]
-      tags            = { Name = "dynamodb-gateway-vpc-endpoint" }
-    }
+
+    # S3 Interface endpoint
+    s3_interface = {
+      service             = "s3"
+      subnet_ids          = module.vpc.private_subnet_id
+      private_dns_enabled = true
+
+      # Required 
+      dns_options = {
+        private_dns_only_for_inbound_resolver_endpoint = false
+      }
+      tags = { Name = "s3-interface-vpc-endpoint" }
+    },
 
     # Interface endpoints for Session Manager (these need security groups)
     ssm = {
@@ -90,10 +97,7 @@ module "endpoints" {
       tags                = { Name = "ec2messages-vpc-endpoint" }
     }
   }
-
-
 }
-
 # IAM Role for Session Manager Access
 # Creates a role that allows EC2 instances to communicate with Systems Manager
 resource "aws_iam_role" "session_manager_role" {
@@ -116,7 +120,6 @@ resource "aws_iam_role" "session_manager_role" {
     Name = "session-manager-role"
   }
 }
-
 # Attach AWS managed policy for Session Manager functionality
 resource "aws_iam_role_policy_attachment" "session_manager_policy" {
   role       = aws_iam_role.session_manager_role.name
@@ -135,9 +138,9 @@ resource "aws_security_group" "private_instance" {
   vpc_id      = module.vpc.vpc_id
 
   egress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
     description = "Allow HTTPS to internet via NAT Gateway"
   }
@@ -192,6 +195,331 @@ resource "aws_instance" "private" {
   }
 }
 
+# NACL
+# Network ACL for Private Subnets
+resource "aws_network_acl" "private" {
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_id
+
+  # Allow all local requests within VPC
+  ingress {
+    protocol   = -1
+    rule_no    = 100
+    action     = "allow"
+    cidr_block = module.vpc.vpc_cidr_block
+    from_port  = 0
+    to_port    = 0
+  }
+  egress {
+    protocol   = -1
+    rule_no    = 100
+    action     = "allow"
+    cidr_block = module.vpc.vpc_cidr_block
+    from_port  = 0
+    to_port    = 0
+  }
+
+  # Docker Registry IPs
+  # registry-1.docker.io
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 200
+    action     = "allow"
+    cidr_block = "54.0.0.0/8"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 200
+    action     = "allow"
+    cidr_block = "54.0.0.0/8"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  # Cloudflare IP ranges
+  # https://api.cloudflare.com/client/v4/ips
+  # https://www.cloudflare.com/ips/
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 300
+    action     = "allow"
+    cidr_block = "173.245.48.0/20"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 301
+    action     = "allow"
+    cidr_block = "103.21.244.0/22"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 302
+    action     = "allow"
+    cidr_block = "103.22.200.0/22"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 303
+    action     = "allow"
+    cidr_block = "103.31.4.0/22"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 304
+    action     = "allow"
+    cidr_block = "141.101.64.0/18"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 305
+    action     = "allow"
+    cidr_block = "108.162.192.0/18"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 306
+    action     = "allow"
+    cidr_block = "190.93.240.0/20"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 307
+    action     = "allow"
+    cidr_block = "188.114.96.0/20"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 308
+    action     = "allow"
+    cidr_block = "197.234.240.0/22"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 309
+    action     = "allow"
+    cidr_block = "198.41.128.0/17"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 310
+    action     = "allow"
+    cidr_block = "162.158.0.0/15"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 311
+    action     = "allow"
+    cidr_block = "104.16.0.0/13"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 312
+    action     = "allow"
+    cidr_block = "104.24.0.0/14"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 313
+    action     = "allow"
+    cidr_block = "172.64.0.0/13"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  ingress {
+    protocol   = "tcp"
+    rule_no    = 314
+    action     = "allow"
+    cidr_block = "131.0.72.0/22"
+    from_port  = 1024
+    to_port    = 65535
+  }
+
+  # Cloudflare egress rules
+  egress {
+    protocol   = "tcp"
+    rule_no    = 300
+    action     = "allow"
+    cidr_block = "173.245.48.0/20"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 301
+    action     = "allow"
+    cidr_block = "103.21.244.0/22"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 302
+    action     = "allow"
+    cidr_block = "103.22.200.0/22"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 303
+    action     = "allow"
+    cidr_block = "103.31.4.0/22"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 304
+    action     = "allow"
+    cidr_block = "141.101.64.0/18"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 305
+    action     = "allow"
+    cidr_block = "108.162.192.0/18"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 306
+    action     = "allow"
+    cidr_block = "190.93.240.0/20"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 307
+    action     = "allow"
+    cidr_block = "188.114.96.0/20"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 308
+    action     = "allow"
+    cidr_block = "197.234.240.0/22"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 309
+    action     = "allow"
+    cidr_block = "198.41.128.0/17"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 310
+    action     = "allow"
+    cidr_block = "162.158.0.0/15"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 311
+    action     = "allow"
+    cidr_block = "104.16.0.0/13"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 312
+    action     = "allow"
+    cidr_block = "104.24.0.0/14"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 313
+    action     = "allow"
+    cidr_block = "172.64.0.0/13"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  egress {
+    protocol   = "tcp"
+    rule_no    = 314
+    action     = "allow"
+    cidr_block = "131.0.72.0/22"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  tags = {
+    Name = "private-subnet-nacl"
+  }
+}
+
+
+
 # Output important information for reference
 output "vpc_id" {
   description = "The ID of the VPC"
@@ -207,3 +535,5 @@ output "instance_private_ip" {
   description = "Private IP address of the EC2 instance"
   value       = aws_instance.private.private_ip
 }
+
+
